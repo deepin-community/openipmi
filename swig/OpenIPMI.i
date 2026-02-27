@@ -2704,7 +2704,7 @@ sol_data_received_cb(ipmi_sol_conn_t *conn,
     int         rv = 0;
 
     conn_ref = swig_make_ref(conn, ipmi_sol_conn_t);
-    swig_call_cb_rv('i', &rv, cb, "sol_data_received", "%p%*b",
+    swig_call_cb_rv('i', &rv, cb, "sol_data_received", "%p%*s",
 		    &conn_ref, count, buf);
     swig_free_ref_check(conn_ref, ipmi_sol_conn_t);
     return rv;
@@ -3123,6 +3123,7 @@ init_glib(void)
     init_lang();
 #endif
     swig_os_hnd = init_glib_shim("");
+    return 0;
 #else
     return ENOSYS;
 #endif
@@ -3138,6 +3139,7 @@ init_glib12(void)
     init_lang();
 #endif
     swig_os_hnd = init_glib_shim("12");
+    return 0;
 #else
     return ENOSYS;
 #endif
@@ -11197,10 +11199,10 @@ void set_cmdlang_event_handler(swig_cb *handler);
 
     swig_cb_val *cmdlang_global_err_handler = NULL;
 
-    void ipmi_cmdlang_global_err(char *objstr,
-				 char *location,
-				 char *errstr,
-				 int  errval)
+    static void cmdlang_global_err(char *objstr,
+				   char *location,
+				   char *errstr,
+				   int  errval)
     {
 	swig_cb_val *handler = cmdlang_global_err_handler;
 
@@ -11220,7 +11222,7 @@ void set_cmdlang_event_handler(swig_cb *handler);
 
     swig_cb_val *cmdlang_event_handler = NULL;
 
-    void ipmi_cmdlang_report_event(ipmi_cmdlang_event_t *event)
+    static void cmdlang_report_event(ipmi_cmdlang_event_t *event)
     {
 	swig_ref event_ref;
 	swig_cb_val *handler = cmdlang_event_handler;
@@ -11238,6 +11240,7 @@ void set_cmdlang_event_handler(swig_cb *handler);
     {
 	swig_cb_val *old_handler = cmdlang_global_err_handler;
 	IPMI_SWIG_C_CB_ENTRY
+	ipmi_cmdlang_err_rpt = cmdlang_global_err;
 	if (valid_swig_cb(handler, global_cmdlang_err))
 	    cmdlang_global_err_handler = ref_swig_cb(handler,
 						     global_cmdlang_err);
@@ -11252,6 +11255,7 @@ void set_cmdlang_event_handler(swig_cb *handler);
     {
 	swig_cb_val *old_handler = cmdlang_event_handler;
 	IPMI_SWIG_C_CB_ENTRY
+	ipmi_cmdlang_event_rpt = cmdlang_report_event;
 	if (valid_swig_cb(handler, cmdlang_event))
 	    cmdlang_event_handler = ref_swig_cb(handler, cmdlang_event);
 	else

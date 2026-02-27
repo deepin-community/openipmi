@@ -7,14 +7,15 @@ Bug-Debian: https://bugs.debian.org/923873
 Forwarded: no
 Last-Update: 2019-03-27
 
---- openipmi-2.0.25.orig/lanserv/OpenIPMI/serv.h
-+++ openipmi-2.0.25/lanserv/OpenIPMI/serv.h
-@@ -474,7 +474,7 @@ int chan_init(channel_t *chan);
+--- openipmi-2.0.33.origlanserv/OpenIPMI/lanserv.h	2022-07-19 12:35:53.700964132 +0200
++++ openipmi-2.0.33/lanserv/OpenIPMI/lanserv.h	2022-07-19 12:36:09.028922609 +0200
+@@ -725,7 +725,7 @@
  void sysinfo_init(sys_data_t *sys);
  
  
 -#define MAX_CONFIG_LINE 1024
 +#define MAX_CONFIG_LINE 10240
  
+ IPMI_LANSERV_DLL_PUBLIC
  const char *mystrtok(char *str, const char *delim, char **next);
- 
+

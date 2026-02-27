@@ -10,7 +10,7 @@ License: LGPL
  `/usr/share/common-licenses/LGPL'.
 
 Files: debian/*
-Copyright: 2004-2018 Noël Köthe <noel@debian.org>
+Copyright: 2004-2022 Noël Köthe <noel@debian.org>
 License: GPL-2+
  On Debian systems, the full text of the GNU General Public
  License version 2 can be found in the file

@@ -87,13 +87,13 @@
 #include <OpenIPMI/ipmi_mc.h>
 #include <OpenIPMI/os_handler.h>
 #include <OpenIPMI/ipmi_posix.h>
-#include <OpenIPMI/serv.h>
-#include <OpenIPMI/lanserv.h>
-#include <OpenIPMI/serserv.h>
-#include <OpenIPMI/ipmbserv.h>
 
 #include "emu.h"
+#include <OpenIPMI/serserv.h>
+#include <OpenIPMI/ipmbserv.h>
 #include <OpenIPMI/persist.h>
+#include <OpenIPMI/internal/winsock_compat.h>
+#include "ipmi_sim.h"
 
 #define MAX_ADDR 4
 
@@ -207,33 +207,13 @@ smi_send(channel_t *chan, msg_t *msg)
 static int
 gen_rand(lanserv_data_t *lan, void *data, int len)
 {
-    int fd = open("/dev/urandom", O_RDONLY);
-    int rv;
-
-    if (fd == -1)
-	return errno;
-
-    while (len > 0) {
-	rv = read(fd, data, len);
-	if (rv < 0) {
-	    rv = errno;
-	    goto out;
-	}
-	len -= rv;
-    }
-
-    rv = 0;
-
- out:
-    close(fd);
-    return rv;
+    return gen_random(data, len);
 }
 
 static int
 sys_gen_rand(sys_data_t *lan, void *data, int len)
 {
-    gen_rand(NULL, data, len);
-    return 0;
+    return gen_random(data, len);
 }
 
 static void
@@ -417,7 +397,7 @@ ser_data_ready(int fd, void *cb_data, os_hnd_fd_id_t *id)
     int           len;
     unsigned char msgd[256];
 
-    len = read(fd, msgd, sizeof(msgd));
+    len = recv(fd, msgd, sizeof(msgd), 0);
     if (len <= 0) {
 	if ((len < 0) && (errno == EINTR))
 	    return;
@@ -425,7 +405,7 @@ ser_data_ready(int fd, void *cb_data, os_hnd_fd_id_t *id)
 	if (ser->codec->disconnected)
 	    ser->codec->disconnected(ser);
 	ser->os_hnd->remove_fd_to_wait_for(ser->os_hnd, id);
-	close(fd);
+	close_socket(fd);
 	ser->con_fd = -1;
 	return;
     }
@@ -451,7 +431,7 @@ ser_bind_ready(int fd, void *cb_data, os_hnd_fd_id_t *id)
     }
 
     if (ser->con_fd >= 0) {
-	close(rv);
+	close_socket(rv);
 	return;
     }
 
@@ -466,7 +446,7 @@ ser_bind_ready(int fd, void *cb_data, os_hnd_fd_id_t *id)
     if (err) {
 	fprintf(stderr, "Unable to add serial socket wait: 0x%x\n", err);
 	ser->con_fd = -1;
-	close(rv);
+	close_socket(rv);
     } else {
 	if (ser->codec->connected)
 	    ser->codec->connected(ser);
@@ -1049,7 +1029,7 @@ console_bind_ready(int fd, void *cb_data, os_hnd_fd_id_t *id)
     if (!newcon) {
 	char *msg = "Out of memory\n";
 	err = write(rv, msg, strlen(msg));
-	close(rv);
+	close_socket(rv);
 	return;
     }
 
@@ -1072,7 +1052,7 @@ console_bind_ready(int fd, void *cb_data, os_hnd_fd_id_t *id)
     if (err) {
 	char *msg = "Unable to add socket wait\n";
 	err = write(rv, msg, strlen(msg));
-	close(rv);
+	close_socket(rv);
 	free(newcon);
 	return;
     }
@@ -1291,8 +1271,8 @@ ipmi_free_timer(ipmi_timer_t *timer)
 
 static ipmi_tick_handler_t *tick_handlers;
 
-void
-ipmi_register_tick_handler(ipmi_tick_handler_t *handler)
+static void
+is_register_tick_handler(ipmi_tick_handler_t *handler)
 {
     handler->next = tick_handlers;
     tick_handlers = handler;
@@ -1534,6 +1514,20 @@ main(int argc, const char *argv[])
     sysinfo.lan_channel_init = lan_channel_init;
     sysinfo.ser_channel_init = ser_channel_init;
     sysinfo.ipmb_channel_init = ipmb_channel_init;
+    sysinfo.mc_alloc_unconfigured = is_mc_alloc_unconfigured;
+    sysinfo.resend_atn = is_resend_atn;
+    sysinfo.mc_get_ipmb = is_mc_get_ipmb;
+    sysinfo.mc_get_channelset = is_mc_get_channelset;
+    sysinfo.mc_get_sol = is_mc_get_sol;
+    sysinfo.mc_get_startcmdinfo = is_mc_get_startcmdinfo;
+    sysinfo.mc_get_users = is_mc_get_users;
+    sysinfo.mc_users_changed = is_mc_users_changed;
+    sysinfo.mc_get_pef = is_mc_get_pef;
+    sysinfo.mc_get_next_recv_q = is_mc_get_next_recv_q;
+    sysinfo.sol_read_config = is_sol_read_config;
+    sysinfo.set_chassis_control_prog = is_set_chassis_control_prog;
+    sysinfo.register_tick_handler = is_register_tick_handler;
+
     data.sys = &sysinfo;
 
     err = pipe(sigpipeh);
@@ -1581,18 +1575,18 @@ main(int argc, const char *argv[])
     stdio_console.prev = NULL;
     data.consoles = &stdio_console;
 
-    err = ipmi_mc_alloc_unconfigured(&sysinfo, 0x20, &mc);
+    err = is_mc_alloc_unconfigured(&sysinfo, 0x20, &mc);
     if (err) {
 	if (err == ENOMEM)
 	    fprintf(stderr, "Out of memory allocation BMC MC\n");
 	exit(1);
     }
     sysinfo.mc = mc;
-    sysinfo.chan_set = ipmi_mc_get_channelset(mc);
-    sysinfo.startcmd = ipmi_mc_get_startcmdinfo(mc);
-    sysinfo.cpef = ipmi_mc_get_pef(mc);
-    sysinfo.cusers = ipmi_mc_get_users(mc);
-    sysinfo.sol = ipmi_mc_get_sol(mc);
+    sysinfo.chan_set = is_mc_get_channelset(mc);
+    sysinfo.startcmd = is_mc_get_startcmdinfo(mc);
+    sysinfo.cpef = is_mc_get_pef(mc);
+    sysinfo.cusers = is_mc_get_users(mc);
+    sysinfo.sol = is_mc_get_sol(mc);
 
     if (read_config(&sysinfo, config_file, print_version))
 	exit(1);

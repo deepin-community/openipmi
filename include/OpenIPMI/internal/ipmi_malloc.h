@@ -56,34 +56,48 @@
 #ifndef OPENIPMI_MALLOC_H
 #define OPENIPMI_MALLOC_H
 
+#include <OpenIPMI/dllvisibility.h>
 #include <OpenIPMI/ipmi_log.h>
+#include <OpenIPMI/os_handler.h>
 
 /* IPMI uses this for memory allocation, so it can easily be
    substituted, etc. */
+IPMI_UTILS_DLL_PUBLIC
 void *ipmi_mem_alloc(int size);
+IPMI_UTILS_DLL_PUBLIC
 void ipmi_mem_free(void *data);
 
 /* strdup using the above memory allocation routines. */
+IPMI_UTILS_DLL_PUBLIC
 char *ipmi_strdup(const char *str);
+IPMI_UTILS_DLL_PUBLIC
 char *ipmi_strndup(const char *str, int n);
 
 /* If you have debug allocations on, then you should call this to
    check for data you haven't freed (after you have freed all the
    data, of course).  It's safe to call even if malloc debugging is
    turned off. */
+IPMI_UTILS_DLL_PUBLIC
 void ipmi_debug_malloc_cleanup(void);
 
+IPMI_UTILS_DLL_PUBLIC
 extern int i__ipmi_debug_malloc;
 #define DEBUG_MALLOC	(i__ipmi_debug_malloc)
 #define DEBUG_MALLOC_ENABLE() i__ipmi_debug_malloc = 1
 
 /* Used by the malloc code to generate logs.  If not set, logs will go
    nowhere. */
+IPMI_UTILS_DLL_PUBLIC
 extern void (*ipmi_malloc_log)(enum ipmi_log_type_e log_type,
 			       const char *format, ...)
 #if __GNUC__ > 2
      __attribute__ ((__format__ (__printf__, 2, 3)))
 #endif
 ;
+
+IPMI_UTILS_DLL_PUBLIC
+int ipmi_malloc_init(os_handler_t *os_hnd);
+IPMI_UTILS_DLL_PUBLIC
+void ipmi_malloc_shutdown(void);
 
 #endif /* OPENIPMI_MALLOC_H */

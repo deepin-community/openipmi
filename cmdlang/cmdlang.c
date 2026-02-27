@@ -39,8 +39,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
 #include <OpenIPMI/ipmiif.h>
 #include <OpenIPMI/ipmi_cmdlang.h>
 #include <OpenIPMI/ipmi_pet.h>
@@ -55,6 +53,8 @@
 /* Internal includes, do not use in your programs */
 #include <OpenIPMI/internal/ipmi_locks.h>
 #include <OpenIPMI/internal/ipmi_malloc.h>
+#include <OpenIPMI/internal/winsock_compat.h>
+#include "cmdlang.h"
 
 /*
  * This is the value passed to a command handler.
@@ -1321,7 +1321,7 @@ ipmi_cmdlang_handle(ipmi_cmdlang_t *cmdlang, char *str)
 
     if (argc == curr_arg) {
 	cmdlang->errstr = "No command";
-	cmdlang->err = ENOMSG;
+	cmdlang->err = ENOSYS;
 	cmdlang->location = "cmdlang.c(ipmi_cmdlang_handle)";
 	goto done;
     }
@@ -1390,7 +1390,7 @@ ipmi_cmdlang_handle(ipmi_cmdlang_t *cmdlang, char *str)
     for (;;) {
 	if (argc == curr_arg) {
 	    cmdlang->errstr = "Missing command";
-	    cmdlang->err = ENOMSG;
+	    cmdlang->err = ENOSYS;
 	    cmdlang->location = "cmdlang.c(ipmi_cmdlang_handle)";
 	    goto done;
 	}
@@ -2457,6 +2457,8 @@ event_down(ipmi_cmdlang_t *cmdlang)
     event->curr_level++;
 }
 
+void (*ipmi_cmdlang_event_rpt)(ipmi_cmdlang_event_t *event);
+
 void
 event_done(ipmi_cmdlang_t *cmdlang)
 {
@@ -2476,8 +2478,8 @@ event_done(ipmi_cmdlang_t *cmdlang)
 				cmdlang->err);
 	if (cmdlang->errstr_dynalloc)
 	    ipmi_mem_free(cmdlang->errstr);
-    } else {
-	ipmi_cmdlang_report_event(event);
+    } else if (ipmi_cmdlang_event_rpt) {
+	ipmi_cmdlang_event_rpt(event);
     }
 
     if (cmdlang->objstr)
@@ -2818,4 +2820,25 @@ int
 ipmi_cmdlang_get_evinfo(void)
 {
     return do_evinfo;
+}
+
+void (*ipmi_cmdlang_err_rpt)(char *objstr,
+			     char *location,
+			     char *errstr,
+			     int  errval);
+
+void
+ipmi_cmdlang_global_err(char *objstr,
+			char *location,
+			char *errstr,
+			int  errval)
+{
+    if (ipmi_cmdlang_err_rpt)
+	ipmi_cmdlang_err_rpt(objstr, location, errstr, errval);
+    else if (objstr)
+	fprintf(stderr, "global error: %s %s: %s (0x%x)", location, objstr,
+		errstr, errval);
+    else
+	fprintf(stderr, "global error: %s: %s (0x%x)", location,
+		errstr, errval);
 }

@@ -34,6 +34,7 @@
 #ifndef OPENIPMI_TCL_H
 #define OPENIPMI_TCL_H
 
+#include <OpenIPMI/dllvisibility.h>
 #include <OpenIPMI/os_handler.h>
 
 #ifdef __cplusplus
@@ -44,11 +45,13 @@ extern "C" {
    set_log_handler in the os_handler. */
 
 /* Allocate and configure an OS handler. */
+IPMI_DLL_PUBLIC
 os_handler_t *ipmi_tcl_get_os_handler(int priority);
 
 /* This is a convenience log handler that allows the tcl stuff to be
    used without having to link with tcl to get the log handler
    information. */
+IPMI_DLL_PUBLIC
 void ipmi_tcl_set_log_handler(void (*hndlr)(const char *domain,
 					    const char *pfx,
 					    const char *msg));

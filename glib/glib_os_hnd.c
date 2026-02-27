@@ -598,6 +598,10 @@ thread_exit(os_handler_t *handler)
 static gint
 timeout_callback(gpointer data)
 {
+    int *timedout = data;
+
+    *timedout = 1;
+
     /* We continually run the timer until it is cancelled. */
     return TRUE;
 }
@@ -606,13 +610,23 @@ static int
 perform_one_op(os_handler_t   *os_hnd,
 	       struct timeval *timeout)
 {
-    /* Note that this is not technically 100% correct in a
-       multi-threaded environment, since another thread may run
-       it, but it is pretty close, I guess. */
-    int   time_ms = (timeout->tv_sec * 1000) + ((timeout->tv_usec+500) / 1000);
-    guint guid = g_timeout_add(time_ms, timeout_callback, NULL);
+    int timedout = 0;
+    int time_ms;
+    guint guid;
+
+    if (timeout) {
+	/* Note that this is not technically 100% correct in a
+	   multi-threaded environment, since another thread may run
+	   it, but it is pretty close, I guess. */
+	time_ms = (timeout->tv_sec * 1000) + ((timeout->tv_usec+500) / 1000);
+	guid = g_timeout_add(time_ms, timeout_callback, &timedout);
+    }
+
     g_main_iteration(TRUE);
-    g_source_remove(guid);
+    if (timeout)
+	g_source_remove(guid);
+    if (timedout)
+	return ETIMEDOUT;
     return 0;
 }
 
@@ -848,7 +862,7 @@ static os_handler_t ipmi_glib_os_handler =
 };
 
 
-os_handler_t *
+IPMI_DLL_PUBLIC os_handler_t *
 ipmi_glib_get_os_handler(int priority)
 {
     os_handler_t    *rv;
@@ -913,7 +927,7 @@ glib_handle_log(const gchar *log_domain,
 	hndlr(log_domain, pfx, message);
 }
 
-void
+IPMI_DLL_PUBLIC void
 ipmi_glib_set_log_handler(void (*hndlr)(const char *domain,
 					const char *pfx,
 					const char *msg))

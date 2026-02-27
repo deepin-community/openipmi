@@ -52,7 +52,7 @@
 #ifndef __IPMBSERV_H
 #define __IPMBSERV_H
 
-#include <OpenIPMI/serv.h>
+#include <OpenIPMI/lanserv.h>
 #include <OpenIPMI/os_handler.h>
 
 typedef struct ipmbserv_data_s ipmbserv_data_t;
@@ -76,8 +76,11 @@ struct ipmbserv_data_s {
     char *ipmbdev;
 };
 
+IPMI_LANSERV_DLL_PUBLIC
 int ipmbserv_read_config(char **tokptr, sys_data_t *sys, const char **errstr);
+IPMI_LANSERV_DLL_PUBLIC
 int ipmbserv_init(ipmbserv_data_t *ipmb);
+IPMI_LANSERV_DLL_PUBLIC
 void ipmbserv_handle_data(ipmbserv_data_t *ipmb, uint8_t *imsg, unsigned int len);
 
 #endif /* __IPMBSERV_H */

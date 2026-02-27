@@ -1,5 +1,5 @@
 OPENIPMI_PKG_NAME=OpenIPMI
-AC_INIT([OpenIPMI], [2.0.29], [minyard@acm.org], [OpenIPMI])
+AC_INIT([OpenIPMI], [2.0.33], [minyard@acm.org], [OpenIPMI])
 AC_CANONICAL_TARGET
 AM_INIT_AUTOMAKE([-Wall])
 AC_CONFIG_HEADER([config.h])
@@ -9,7 +9,7 @@ AC_CONFIG_MACRO_DIR([m4])
 
 AC_SUBST(OPENIPMI_VERSION_MAJOR, 2)
 AC_SUBST(OPENIPMI_VERSION_MINOR, 0)
-AC_SUBST(OPENIPMI_VERSION_RELEASE, 29)
+AC_SUBST(OPENIPMI_VERSION_RELEASE, 33)
 AC_SUBST(OPENIPMI_VERSION_EXTRA, )
 
 
@@ -29,6 +29,10 @@ case $target_os in
 	solaris*)
 		# Some solaris systems have epoll, but it's too broken to use.
 		ax_cv_have_epoll_pwait=false
+		;;
+
+	mingw*)
+		LIBS="$LIBS -lws2_32 -liphlpapi -lgdi32 -lbcrypt"
 		;;
 esac
 
@@ -337,7 +341,8 @@ else
    GLIB_LIBS="$gliblibs"
 fi
 echo "checking for glib... $haveglib"
-   
+
+AM_CONDITIONAL([HAVE_GLIB], [test "x$haveglib" = "xyes"])
 if test "x$haveglib" = "xyes"; then
    AC_DEFINE([HAVE_GLIB], [], [Have GLIB libraries])
    GLIB_LIB='$(top_builddir)/glib/libOpenIPMIglib.la'
@@ -577,15 +582,19 @@ AC_SUBST(PYTHON_SWIG_FLAGS)
 
 # Check for Tkinter/Tix
 if test "x$tkinter" = "x"; then
-   if test "x$pythonprog" != "x"; then
+   if test "x$PYTHON" != "x"; then
       cat - <<_ACEOF >conftest.py
 try:
   import Tix
   print('yes')
 except:
-  print('no')
+  try:
+    import tkinter
+    print('yes')
+  except:
+    print('no')
 _ACEOF
-      tkinter=`python conftest.py`
+      tkinter=`${PYTHON} conftest.py`
       rm -f conftest.py
    fi
 fi
@@ -612,6 +621,11 @@ if test "x$tryswig" = "xyes"; then
 fi
 AC_SUBST(SWIG_DIR)
 AC_SUBST(SWIG)
+
+# Check for readline
+AC_CHECK_LIB(readline, rl_initialize, READLINE_LIBS=-lreadline,
+      [AC_MSG_ERROR([libreadline is required!])])
+AC_SUBST(READLINE_LIBS)
 
 # Handle SNMP support
 if test "x$tryucdsnmp" != "xno"; then

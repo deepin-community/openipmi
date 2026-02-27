@@ -30,6 +30,8 @@
  *  Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include "config.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,9 +50,15 @@
 #include <OpenIPMI/ipmi_err.h>
 #include <OpenIPMI/ipmi_auth.h>
 #include <OpenIPMI/ipmi_lan.h>
+#ifdef HAVE_GLIB
+#include <OpenIPMI/ipmi_glib.h>
+#define setup_os_handler() ipmi_glib_get_os_handler(0)
+#else
 #include <OpenIPMI/ipmi_posix.h>
+#define setup_os_handler() ipmi_posix_setup_os_handler()
+#endif
 
-#include <OpenIPMI/internal/ipmi_int.h>
+#include <OpenIPMI/ipmi_log.h>
 #include <OpenIPMI/ipmi_sol.h>
 #include <OpenIPMI/ipmi_debug.h>
 
@@ -706,6 +714,14 @@ static int parse_sol_alerts(char *src, ipmi_sol_serial_alert_behavior *behavior)
 		} \
 	}
 
+int ipmi_closed;
+
+static void
+ipmi_connection_closed(ipmi_con_t *ipmi, void *cb_data)
+{
+    ipmi_closed = 1;
+}
+
 int main(int argc, char *argv[])
 {
 	int         rv;
@@ -715,6 +731,7 @@ int main(int argc, char *argv[])
 	char *name = "remote system";
 	os_hnd_fd_id_t *stdin_id;
 	sol_configuration_t sol_configuration;
+	struct timeval zero_timeout;
 
 	memset(&sol_configuration, 0, sizeof(sol_configuration));
 
@@ -728,7 +745,7 @@ int main(int argc, char *argv[])
 	progname = argv[0];
 
 	/* OS handler allocated first. */
-	os_hnd = ipmi_posix_setup_os_handler();
+	os_hnd = setup_os_handler();
 	if (!os_hnd) {
 		fprintf(stderr, "main: Unable to allocate os handler\n");
 		exit(1);
@@ -833,6 +850,7 @@ int main(int argc, char *argv[])
 
 
 	rv = ipmi_args_setup_con(args, os_hnd, NULL, &ipmi);
+	ipmi_free_args(args);
 	if (rv) {
 	        ipmi_log(IPMI_LOG_FATAL, "ipmi_ip_setup_con: %s", strerror(rv));
 		exit(1);
@@ -899,6 +917,20 @@ int main(int argc, char *argv[])
 		ipmi_sol_force_close(active_connection);
 		ipmi_sol_free(active_connection);
 	}
+
+	rv = ipmi->close_connection_done(ipmi, ipmi_connection_closed, NULL);
+	if (!rv) {
+	    while (!ipmi_closed)
+		os_hnd->perform_one_op(os_hnd, NULL);
+	}
+
+	os_hnd->remove_fd_to_wait_for(os_hnd, stdin_id);
+
+	/* Wait for all operations to complete. */
+	do {
+	    zero_timeout.tv_sec = 0;
+	    zero_timeout.tv_usec = 0;
+	} while (os_hnd->perform_one_op(os_hnd, &zero_timeout) == 0);
 
 	if (connection_up)
 		printf("Connection to %s closed.\n", name);

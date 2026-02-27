@@ -32,10 +32,6 @@
 
 #include <stdio.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <netdb.h>
 #include <errno.h>
 #include <string.h>
 #include <ctype.h>
@@ -44,6 +40,7 @@
 #include <sys/select.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include <OpenIPMI/internal/winsock_compat.h>
 
 #define _GNU_SOURCE
 #include <getopt.h>
@@ -1138,7 +1135,7 @@ next_tok(char **str)
 static void
 exit_handler(char *line, struct msg_info *mi)
 {
-    close(mi->sock);
+    close_socket(mi->sock);
     exit(0);
 }
 

@@ -56,7 +56,7 @@
 #ifndef __SERSERV_H
 #define __SERSERV_H
 
-#include <OpenIPMI/serv.h>
+#include <OpenIPMI/lanserv.h>
 #include <OpenIPMI/os_handler.h>
 
 typedef struct serserv_data_s serserv_data_t;
@@ -113,8 +113,11 @@ struct serserv_data_s {
     unsigned int  attn_chars_len;
 };
 
+IPMI_LANSERV_DLL_PUBLIC
 int serserv_read_config(char **tokptr, sys_data_t *sys, const char **errstr);
+IPMI_LANSERV_DLL_PUBLIC
 int serserv_init(serserv_data_t *ser);
+IPMI_LANSERV_DLL_PUBLIC
 void serserv_handle_data(serserv_data_t *ser, uint8_t *data, unsigned int len);
 
 #endif /* __SERSERV_H */

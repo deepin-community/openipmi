@@ -41,14 +41,15 @@
 #include <stdint.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
+
+#include <OpenIPMI/internal/winsock_compat.h>
 
 #include <OpenIPMI/ipmiif.h>
 #include <OpenIPMI/ipmi_fru.h>
 #include <OpenIPMI/ipmi_err.h>
 #include <OpenIPMI/ipmi_msgbits.h>
 
+#include <OpenIPMI/internal/winsock_compat.h>
 #include <OpenIPMI/internal/locked_list.h>
 #include <OpenIPMI/internal/ipmi_domain.h>
 #include <OpenIPMI/internal/ipmi_int.h>
@@ -963,6 +964,9 @@ fru_decode_internal_use_area(ipmi_fru_t        *fru,
 {
     ipmi_fru_internal_use_area_t *u;
     ipmi_fru_record_t            *rec;
+
+    if (data_len < 1) /* We expect at least the version. */
+	return EINVAL;
 
     rec = fru_record_alloc(IPMI_FRU_FTR_INTERNAL_USE_AREA, 0, data_len);
     if (!rec)
@@ -4831,6 +4835,8 @@ process_fru_info(ipmi_fru_t *fru)
 	else
 	    next_off = foff[j].offset;
 	plen = next_off - offset;
+	if (plen < 0)
+	    goto out_err; /* Invalid FRU data. */
 
 	err = fru_area_info[i].decode(fru, data+offset, plen, &recs[i]);
 	if (err)

@@ -35,11 +35,10 @@
 #include <string.h>
 #include <stdio.h> /* for snprintf */
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+
+#include <OpenIPMI/internal/winsock_compat.h>
 
 #include <OpenIPMI/ipmi_conn.h>
 #include <OpenIPMI/ipmi_err.h>
@@ -49,6 +48,7 @@
 
 #include <OpenIPMI/internal/ipmi_oem.h>
 #include <OpenIPMI/internal/ipmi_int.h>
+#include <OpenIPMI/internal/winsock_compat.h>
 
 static unsigned char asf_iana[] = { 0x00, 0x00, 0x11, 0xbe };
 
@@ -179,7 +179,7 @@ fd_sock_handler(int fd, void *cb_data, os_hnd_fd_id_t *id)
     atca_ip_addr_info_t *addrs;
 
     from_len = sizeof(ipaddrd);
-    len = recvfrom(fd, data, sizeof(data), 0, (struct sockaddr *)&ipaddrd, 
+    len = recvfrom(fd, (void*) data, sizeof(data), 0, (struct sockaddr *)&ipaddrd,
 		   &from_len);
     if (len < 10)
 	/* Got an error, or not enough data, just return. */
@@ -254,10 +254,10 @@ static int register_atca_conn(atca_conn_info_t *info)
 	    rv = errno;
 	    goto out_unlock;
 	}
-	rv = fcntl(fd_sock, F_SETFL, O_NONBLOCK);
+	rv = socket_set_nonblock(fd_sock);
 	if (rv) {
 	    rv = errno;
-	    close(fd_sock);
+	    close_socket(fd_sock);
 	    fd_sock = -1;
 	    goto out_unlock;
 	}
@@ -269,7 +269,7 @@ static int register_atca_conn(atca_conn_info_t *info)
 					NULL,
 					&fd_wait);
 	if (rv) {
-	    close(fd_sock);
+	    close_socket(fd_sock);
 	    fd_sock = -1;
 	    goto out_unlock;
 	}
@@ -352,7 +352,7 @@ atca_check_and_ping(ipmi_con_t *ipmi, atca_conn_info_t *info)
 	}
 
 	/* Send a ping. */
-	sendto(fd_sock, data, sizeof(data), 0,
+	sendto(fd_sock, (void*) data, sizeof(data), 0,
 	       (struct sockaddr *) &ainfo->addr, ainfo->addr_len);
 	ainfo->dropped_pings++;
     }
@@ -1021,7 +1021,7 @@ ipmi_oem_atca_conn_shutdown(void)
     if (fd_sock != -1) {
 	os_handler_t *os_hnd = ipmi_get_global_os_handler();
 	os_hnd->remove_fd_to_wait_for(os_hnd, fd_wait);
-	close(fd_sock);
+	close_socket(fd_sock);
 	fd_sock = -1;
     }
 

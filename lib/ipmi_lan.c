@@ -34,24 +34,23 @@
 #include <config.h>
 
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <sys/stat.h>
-#include <sys/poll.h>
 #include <sys/time.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <string.h>
-#include <netdb.h>
-#include <arpa/inet.h>
+
+#include <OpenIPMI/internal/winsock_compat.h>
 
 #include <OpenIPMI/ipmi_conn.h>
 #include <OpenIPMI/ipmi_msgbits.h>
 #include <OpenIPMI/ipmi_auth.h>
 #include <OpenIPMI/ipmi_err.h>
 #include <OpenIPMI/ipmi_lan.h>
+#include <OpenIPMI/ipmi_mc.h>
 
 #include <OpenIPMI/internal/ipmi_event.h>
 #include <OpenIPMI/internal/ipmi_int.h>
@@ -76,8 +75,8 @@ dump_hex(void *vdata, int len)
 
 /* Timeout to wait for IPMI responses, in microseconds.  For commands
    with side effects, we wait 5 seconds, not one. */
-#define LAN_RSP_TIMEOUT 1000000
-#define LAN_RSP_TIMEOUT_SIDEEFF 5000000
+#define DEFAULT_LAN_RSP_TIMEOUT 1000000
+#define DEFAULT_LAN_RSP_TIMEOUT_SIDEEFF 5000000
 
 /* # of times to try a message before we fail it. */
 #define LAN_RSP_RETRIES 6
@@ -391,6 +390,10 @@ struct lan_data_s
        larger than 63 (64 sequence numbers minus 1 for our reserved
        sequence zero. */
     unsigned int max_outstanding_msg_count;
+
+    /* Timeouts for normal messages and messages with side effects. */
+    int msg_timeout;
+    int msg_timeout_sideeff;
 
     /* Address family specified at startup. */
     unsigned int addr_family;
@@ -1267,6 +1270,7 @@ find_free_lan_fd(int family, lan_data_t *lan, int *slot)
 		rv = ipmi_create_global_lock(&item->con_lock);
 		if (rv) {
 		    ipmi_mem_free(item);
+		    item = NULL;
 		    goto out_unlock;
 		}
 		item->lock = lock;
@@ -1291,9 +1295,9 @@ find_free_lan_fd(int family, lan_data_t *lan, int *slot)
 	/* Bind is not necessary, we don't care what port we are. */
 
 	/* We want it to be non-blocking. */
-	rv = fcntl(item->fd, F_SETFL, O_NONBLOCK);
+	rv = socket_set_nonblock(item->fd);
 	if (rv) {
-	    close(item->fd);
+	    close_socket(item->fd);
 	    item->next = *free_list;
 	    *free_list = item;
 	    item = NULL;
@@ -1307,7 +1311,7 @@ find_free_lan_fd(int family, lan_data_t *lan, int *slot)
 					    NULL,
 					    &(item->fd_wait_id));
 	if (rv) {
-	    close(item->fd);
+	    close_socket(item->fd);
 	    item->next = *free_list;
 	    *free_list = item;
 	    item = NULL;
@@ -1334,7 +1338,7 @@ release_lan_fd(lan_fd_t *item, int slot)
     item->cons_in_use--;
     if (item->cons_in_use == 0) {
 	lan_os_hnd->remove_fd_to_wait_for(lan_os_hnd, item->fd_wait_id);
-	close(item->fd);
+	close_socket(item->fd);
 	item->next->prev = item->prev;
 	item->prev->next = item->next;
 	item->next = *(item->free_list);
@@ -1362,7 +1366,7 @@ hash_lan(const ipmi_con_t *ipmi)
 {
     unsigned int idx;
 
-    idx = (((unsigned long) ipmi)
+    idx = (((uintptr_t) ipmi)
 	   >> (sizeof(unsigned long) + LAN_HASH_SHIFT));
     idx %= LAN_HASH_SIZE;
     return idx;
@@ -1901,7 +1905,7 @@ lan_send_addr(lan_data_t              *lan,
 
     add_stat(lan->ipmi, STAT_XMIT_PACKETS, 1);
 
-    rv = sendto(lan->fd->fd, tmsg, pos, 0,
+    rv = sendto(lan->fd->fd, (void*) tmsg, pos, 0,
 		(struct sockaddr *) &(lan->cparm.ip_addr[addr_num].s_ipsock),
 		lan->cparm.ip_addr[addr_num].ip_addr_len);
     if (rv == -1)
@@ -2464,11 +2468,11 @@ rsp_timeout_handler(void              *cb_data,
 	    rspi->data[0] = IPMI_UNKNOWN_ERR_CC;
 	} else {
 	    if (!lan->seq_table[seq].side_effects) {
-		timeout.tv_sec = LAN_RSP_TIMEOUT / 1000000;
-		timeout.tv_usec = LAN_RSP_TIMEOUT % 1000000;
+		timeout.tv_sec = lan->msg_timeout / 1000000;
+		timeout.tv_usec = lan->msg_timeout % 1000000;
 	    } else {
-		timeout.tv_sec = LAN_RSP_TIMEOUT_SIDEEFF / 1000000;
-		timeout.tv_usec = LAN_RSP_TIMEOUT_SIDEEFF % 1000000;
+		timeout.tv_sec = lan->msg_timeout_sideeff / 1000000;
+		timeout.tv_usec = lan->msg_timeout_sideeff % 1000000;
 	    }
 	    ipmi->os_hnd->start_timer(ipmi->os_hnd,
 				      id,
@@ -2730,11 +2734,11 @@ handle_msg_send(lan_timer_info_t      *info,
     }
 
     if (!side_effects) {
-	timeout.tv_sec = LAN_RSP_TIMEOUT / 1000000;
-	timeout.tv_usec = LAN_RSP_TIMEOUT % 1000000;
+	timeout.tv_sec = lan->msg_timeout / 1000000;
+	timeout.tv_usec = lan->msg_timeout % 1000000;
     } else {
-	timeout.tv_sec = LAN_RSP_TIMEOUT_SIDEEFF / 1000000;
-	timeout.tv_usec = LAN_RSP_TIMEOUT_SIDEEFF % 1000000;
+	timeout.tv_sec = lan->msg_timeout_sideeff / 1000000;
+	timeout.tv_usec = lan->msg_timeout_sideeff % 1000000;
     }
     lan->seq_table[seq].timer = info->timer;
     rv = ipmi->os_hnd->start_timer(ipmi->os_hnd,
@@ -3467,7 +3471,7 @@ data_handler(int            fd,
     int                addr_num = 0; /* Keep gcc happy and initialize */
 
     from_len = sizeof(ipaddrd.s_ipsock);
-    len = recvfrom(fd, data, sizeof(data), 0, (struct sockaddr *)&ipaddrd, 
+    len = recvfrom(fd, (void*) data, sizeof(data), 0, (struct sockaddr *)&ipaddrd,
 		   &from_len);
 
     if (len < 0)
@@ -3582,7 +3586,7 @@ ipmi_lan_send_command_forceip(ipmi_con_t            *ipmi,
 	goto out_unlock;
     }
 
-    rspi->data4 = (void *) (long) addr_num;
+    rspi->data4 = (void *) (intptr_t) addr_num;
     rv = handle_msg_send(info, addr_num, addr, addr_len, msg,
 			 rsp_handler, rspi, 0);
     /* handle_msg_send handles freeing the timer and info on an error */
@@ -4055,11 +4059,14 @@ lan_cleanup(ipmi_con_t *ipmi)
 	ipmi_mem_free(q_item);
     }
     if (lan->audit_info) {
-	rv = ipmi->os_hnd->stop_timer(ipmi->os_hnd, lan->audit_timer);
-	if (rv)
+	rv = 0;
+	if (lan->audit_timer)
+	    rv = ipmi->os_hnd->stop_timer(ipmi->os_hnd, lan->audit_timer);
+	if (rv) {
 	    lan->audit_info->cancelled = 1;
-	else {
-	    ipmi->os_hnd->free_timer(ipmi->os_hnd, lan->audit_timer);
+	} else {
+	    if (lan->audit_timer)
+		ipmi->os_hnd->free_timer(ipmi->os_hnd, lan->audit_timer);
 	    ipmi_mem_free(lan->audit_info);
 	}
     }
@@ -4194,7 +4201,7 @@ handle_ipmb_addr(ipmi_con_t   *ipmi,
 		 void         *cb_data)
 {
     lan_data_t   *lan;
-    unsigned int addr_num = (unsigned long) cb_data;
+    unsigned int addr_num = (uintptr_t) cb_data;
     unsigned int i;
 
     if (err) {
@@ -4231,7 +4238,7 @@ handle_dev_id(ipmi_con_t *ipmi, ipmi_msgi_t *rspi)
     int          err;
     unsigned int manufacturer_id;
     unsigned int product_id;
-    int          addr_num = (long) rspi->data4;
+    int          addr_num = (intptr_t) rspi->data4;
 
     if (!ipmi) {
 	err = ECANCELED;
@@ -4264,7 +4271,7 @@ handle_dev_id(ipmi_con_t *ipmi, ipmi_msgi_t *rspi)
 	if (ipmi->get_ipmb_addr) {
 	    /* We have a way to fetch the IPMB address, do so. */
 	    err = ipmi->get_ipmb_addr(ipmi, handle_ipmb_addr,
-				      (void *) (long) addr_num);
+				      (void *) (intptr_t) addr_num);
 	    if (err)
 		goto out_err;
 	} else
@@ -4308,7 +4315,7 @@ lan_oem_done(ipmi_con_t *ipmi, void *cb_data)
     lan_data_t  *lan;
     int         rv;
     ipmi_msgi_t *rspi = cb_data;
-    int         addr_num = (long) rspi->data4;
+    int         addr_num = (intptr_t) rspi->data4;
 
     if (! ipmi) {
 	ipmi_mem_free(rspi);
@@ -4329,7 +4336,7 @@ session_privilege_set(ipmi_con_t *ipmi, ipmi_msgi_t *rspi)
     ipmi_msg_t *msg = &rspi->msg;
     lan_data_t *lan;
     int        rv;
-    int        addr_num = (long) rspi->data4;
+    int        addr_num = (intptr_t) rspi->data4;
 
     if (!ipmi) {
 	handle_connected(ipmi, ECANCELED, addr_num);
@@ -4506,7 +4513,7 @@ got_rmcpp_open_session_rsp(ipmi_con_t *ipmi, ipmi_msgi_t  *rspi)
 {
     ipmi_msg_t   *msg = &rspi->msg;
     lan_data_t   *lan;
-    int          addr_num = (long) rspi->data4;
+    int          addr_num = (intptr_t) rspi->data4;
     uint32_t     session_id;
     uint32_t     mgsys_session_id;
     unsigned int privilege;
@@ -4768,7 +4775,7 @@ session_activated(ipmi_con_t *ipmi, ipmi_msgi_t  *rspi)
     ipmi_msg_t *msg = &rspi->msg;
     lan_data_t *lan;
     int        rv;
-    int        addr_num = (long) rspi->data4;
+    int        addr_num = (intptr_t) rspi->data4;
 
 
     if (!ipmi) {
@@ -4847,7 +4854,7 @@ challenge_done(ipmi_con_t *ipmi, ipmi_msgi_t *rspi)
     ipmi_msg_t *msg = &rspi->msg;
     lan_data_t *lan;
     int        rv;
-    int        addr_num = (long) rspi->data4;
+    int        addr_num = (intptr_t) rspi->data4;
 
 
     if (!ipmi) {
@@ -4930,7 +4937,7 @@ auth_cap_done(ipmi_con_t *ipmi, ipmi_msgi_t *rspi)
     ipmi_msg_t *msg = &rspi->msg;
     lan_data_t *lan;
     int        rv;
-    int        addr_num = (long) rspi->data4;
+    int        addr_num = (intptr_t) rspi->data4;
     int        supports_ipmi2;
     int        extended_capabilities_reported;
 
@@ -5056,7 +5063,7 @@ auth_cap_done_p(ipmi_con_t *ipmi, ipmi_msgi_t *rspi)
 {
     ipmi_msg_t *msg = &rspi->msg;
     lan_data_t *lan;
-    int        addr_num = (long) rspi->data4;
+    int        addr_num = (intptr_t) rspi->data4;
     int        rv;
 
     if (!ipmi) {
@@ -5463,6 +5470,8 @@ ipmi_lanp_setup_con(ipmi_lanp_parm_t *parms,
     int max_outstanding_msg_count = DEFAULT_MAX_OUTSTANDING_MSG_COUNT;
     unsigned int addr_family = AF_UNSPEC;
     unsigned int set_addr_family = AF_UNSPEC;
+    int msg_timeout = DEFAULT_LAN_RSP_TIMEOUT;
+    int msg_timeout_sideeff = DEFAULT_LAN_RSP_TIMEOUT_SIDEEFF;
 
     memset(&cparm, 0, sizeof(cparm));
 
@@ -5574,7 +5583,15 @@ ipmi_lanp_setup_con(ipmi_lanp_parm_t *parms,
 	case IPMI_LANP_ADDRESS_FAMILY:
 	    set_addr_family = addr_family = parms[i].parm_val;
 	    break;
-		
+
+	case IPMI_LANP_DEFAULT_TIMEOUT:
+	    msg_timeout = parms[i].parm_val;
+	    break;
+
+	case IPMI_LANP_DEFAULT_SIDEEFFECT_TIMEOUT:
+	    msg_timeout_sideeff = parms[i].parm_val;
+	    break;
+
 	default:
 	    return EINVAL;
 	}
@@ -5721,6 +5738,8 @@ ipmi_lanp_setup_con(ipmi_lanp_parm_t *parms,
 
     lan->outstanding_msg_count = 0;
     lan->max_outstanding_msg_count = max_outstanding_msg_count;
+    lan->msg_timeout = msg_timeout;
+    lan->msg_timeout_sideeff = msg_timeout_sideeff;
     lan->addr_family = set_addr_family;
     lan->wait_q = NULL;
     lan->wait_q_tail = NULL;
@@ -6967,22 +6986,12 @@ i_ipmi_lan_init(os_handler_t *os_hnd)
     int rv;
     int i;
 
-    rv = ipmi_create_global_lock(&lan_list_lock);
-    if (rv)
-	return rv;
-
-    rv = ipmi_create_global_lock(&fd_list_lock);
-    if (rv)
-	return rv;
     memset(&fd_list, 0, sizeof(fd_list));
     fd_list.next = &fd_list;
     fd_list.prev = &fd_list;
     fd_list.cons_in_use = MAX_CONS_PER_FD;
 
 #ifdef PF_INET6
-    rv = ipmi_create_global_lock(&fd6_list_lock);
-    if (rv)
-	return rv;
     memset(&fd6_list, 0, sizeof(fd6_list));
     fd6_list.next = &fd6_list;
     fd6_list.prev = &fd6_list;
@@ -6997,6 +7006,20 @@ i_ipmi_lan_init(os_handler_t *os_hnd)
 	lan_ip_list[i].prev = &(lan_ip_list[i]);
 	lan_ip_list[i].lan = NULL;
     }
+
+    rv = ipmi_create_global_lock(&lan_list_lock);
+    if (rv)
+	return rv;
+
+    rv = ipmi_create_global_lock(&fd_list_lock);
+    if (rv)
+	return rv;
+
+#ifdef PF_INET6
+    rv = ipmi_create_global_lock(&fd6_list_lock);
+    if (rv)
+	return rv;
+#endif
 
     rv = ipmi_create_global_lock(&lan_payload_lock);
     if (rv)
@@ -7015,6 +7038,10 @@ i_ipmi_lan_init(os_handler_t *os_hnd)
     if (rv)
 	return rv;
 
+    rv = network_init();
+    if (rv)
+	return rv;
+
     lan_os_hnd = os_hnd;
 
     return 0;
@@ -7023,6 +7050,8 @@ i_ipmi_lan_init(os_handler_t *os_hnd)
 void
 i_ipmi_lan_shutdown(void)
 {
+    network_shutdown();
+
     i_ipmi_unregister_con_type("lan", lan_setup);
     i_ipmi_free_con_setup(lan_setup);
     lan_setup = NULL;
@@ -7063,14 +7092,17 @@ i_ipmi_lan_shutdown(void)
 	ipmi_destroy_lock(fd_list_lock);
 	fd_list_lock = NULL;
     }
-    while (fd_list.next != &fd_list) {
-	lan_fd_t *e = fd_list.next;
-	e->next->prev = e->prev;
-	e->prev->next = e->next;
-	lan_os_hnd->remove_fd_to_wait_for(lan_os_hnd, e->fd_wait_id);
-	close(e->fd);
-	ipmi_destroy_lock(e->con_lock);
-	ipmi_mem_free(e);
+    if (fd_list.next) {
+	while (fd_list.next != &fd_list) {
+	    lan_fd_t *e = fd_list.next;
+	    e->next->prev = e->prev;
+	    e->prev->next = e->next;
+	    lan_os_hnd->remove_fd_to_wait_for(lan_os_hnd, e->fd_wait_id);
+	    close_socket(e->fd);
+	    ipmi_destroy_lock(e->con_lock);
+	    ipmi_mem_free(e);
+	}
+	memset(&fd_list, 0, sizeof(fd_list));
     }
     while (fd_free_list) {
 	lan_fd_t *e = fd_free_list;
@@ -7083,14 +7115,17 @@ i_ipmi_lan_shutdown(void)
 	ipmi_destroy_lock(fd6_list_lock);
 	fd6_list_lock = NULL;
     }
-    while (fd6_list.next != &fd6_list) {
-	lan_fd_t *e = fd6_list.next;
-	e->next->prev = e->prev;
-	e->prev->next = e->next;
-	lan_os_hnd->remove_fd_to_wait_for(lan_os_hnd, e->fd_wait_id);
-	close(e->fd);
-	ipmi_destroy_lock(e->con_lock);
-	ipmi_mem_free(e);
+    if (fd6_list.next) {
+	while (fd6_list.next != &fd6_list) {
+	    lan_fd_t *e = fd6_list.next;
+	    e->next->prev = e->prev;
+	    e->prev->next = e->next;
+	    lan_os_hnd->remove_fd_to_wait_for(lan_os_hnd, e->fd_wait_id);
+	    close_socket(e->fd);
+	    ipmi_destroy_lock(e->con_lock);
+	    ipmi_mem_free(e);
+	}
+	memset(&fd6_list, 0, sizeof(fd6_list));
     }
     while (fd6_free_list) {
 	lan_fd_t *e = fd6_free_list;
