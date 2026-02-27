@@ -3,14 +3,14 @@
 
 Name: OpenIPMI
 Summary: %{name} - Library interface to IPMI
-Version: 2.0.29
+Version: 2.0.33
 Release: 2
 License: LGPL
 URL: http://openipmi.sourceforge.net
 Group: Utilities
 Vendor: OpenIPMI Project
 Packager: Tariq Shureih <tariq.shureih@intel.com>
-Source: %{name}-2.0.29.tar.gz
+Source: %{name}-2.0.33.tar.gz
 Buildroot: /var/tmp/%{name}-root
 BuildRequires: pkgconfig, perl >= 5, swig >= 1.3
 Summary: IPMI Library

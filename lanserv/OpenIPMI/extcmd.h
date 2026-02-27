@@ -56,7 +56,7 @@
 #ifndef _EXTCMD_H_
 #define _EXTCMD_H_
 
-#include <OpenIPMI/serv.h>
+#include <OpenIPMI/lanserv.h>
 #include <stddef.h>
 
 enum extcmd_info_type_e {
@@ -85,15 +85,21 @@ typedef struct extcmd_info_s {
     size_t offset;
 } extcmd_info_t;
 
+IPMI_LANSERV_DLL_PUBLIC
 int extcmd_getvals(sys_data_t *sys,
 		   void *baseloc, const char *cmd,
 		   extcmd_info_t *ts, unsigned int count);
+IPMI_LANSERV_DLL_PUBLIC
 int extcmd_setvals(sys_data_t *sys,
 		   void *baseloc, const char *cmd,
 		   extcmd_info_t *ts, unsigned char *setit,
 		   unsigned int count);
+IPMI_LANSERV_DLL_PUBLIC
 int extcmd_checkvals(sys_data_t *sys, void *baseloc, const char *cmd,
 		     extcmd_info_t *ts, unsigned int count);
 
+int ipmi_cmd_permitted(unsigned char priv,
+		       unsigned char netfn,
+		       unsigned char cmd);
 
 #endif /* _EXTCMD_H_ */

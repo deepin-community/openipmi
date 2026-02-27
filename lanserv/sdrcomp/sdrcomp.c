@@ -51,6 +51,8 @@
 static FILE *outfile;
 static char *outfname = NULL;
 
+static int ascii_encoding_8_bit = 0;
+
 static void
 out_err(int err)
 {
@@ -832,6 +834,7 @@ add_variable(const char *name, const char *value)
 	var->name = strdup(name);
 	if (!var->name) {
 	    fprintf(stderr, "Out of memory\n");
+	    free(var);
 	    return ENOMEM;
 	}
 	var->next = NULL;
@@ -991,6 +994,8 @@ get_delim_str(char **rtokptr, char **rval, char **err)
 	if (rv) {
 	    char *newrv = malloc(strlen(rv) + strlen(val) + 1);
 	    if (!newrv) {
+		if (rv)
+		    free(rv);
 		*err = "Out of memory copying string";
 		return -1;
 	    }
@@ -1473,8 +1478,12 @@ ipmi_compile_sdr(FILE *f, unsigned int type,
 		err = get_delim_str(&tokptr, &sval, errstr);
 		if (err)
 		    goto out_err;
-		ipmi_set_device_string(sval, IPMI_ASCII_STR, strlen(sval),
-				       str, 0, &out_len);
+		if (!ascii_encoding_8_bit)
+			ipmi_set_device_string2(sval, IPMI_ASCII_STR, strlen(sval),
+						str, 0, &out_len, IPMI_STRING_OPTION_NONE);
+		else
+			ipmi_set_device_string2(sval, IPMI_ASCII_STR, strlen(sval),
+						str, 0, &out_len, IPMI_STRING_OPTION_8BIT_ONLY);
 		free(sval);
 		if (out_len > 1) {
 		    unsigned char *newsdr = realloc(sdr, sdr_len + out_len - 1);
@@ -1590,6 +1599,63 @@ ipmi_compile_sdr(FILE *f, unsigned int type,
     return err;
 }
 
+struct includes {
+    const char *dirname;
+    struct includes *next;
+};
+static struct includes *includes;
+
+static void
+add_include_dir(const char *dirname)
+{
+    struct includes *n, *p;
+
+    n = malloc(sizeof(*n));
+    if (!n) {
+	fprintf(stderr, "Out of memory allocating include dir\n");
+	exit(1);
+    }
+
+    n->dirname = dirname;
+    n->next = NULL;
+    if (!includes) {
+	includes = n;
+	return;
+    }
+    p = includes;
+    while (p->next)
+	p = p->next;
+    p->next = n;
+}
+
+static FILE *
+open_include(const char *filename, unsigned int line, const char *name)
+{
+    FILE *f;
+    struct includes *n;
+    int namelen;
+
+    f = fopen(name, "r");
+    if (f)
+	return f;
+
+    namelen = strlen(name);
+    for (n = includes; n; n = n->next) {
+	char *s = malloc(namelen + strlen(n->dirname) + 2);
+
+	sprintf(s, "%s/%s", n->dirname, name);
+	f = fopen(s, "r");
+	if (f)
+	    return f;
+	free(s);
+    }
+
+    fprintf(stderr, "%s:%3d: Unable to open included file %s\n",
+	    filename, line, name);
+    out_err(1);
+    return NULL;
+}
+
 static void
 compile_file(const char *filename, FILE *f, persist_t *p, int outraw,
 	     unsigned int *sdrnum)
@@ -1691,12 +1757,7 @@ compile_file(const char *filename, FILE *f, persist_t *p, int outraw,
 		out_err(1);
 	    }
 
-	    f2 = fopen(nfilename, "r");
-	    if (!f2) {
-		fprintf(stderr, "%s:%3d: Unable to open included file %s\n",
-			filename, line, nfilename);
-		out_err(1);
-	    }
+	    f2 = open_include(filename, line, nfilename);
 
 	    compile_file(nfilename, f2, p, outraw, sdrnum);
 	    
@@ -1951,7 +2012,7 @@ static char *progname;
 static void
 help(void)
 {
-    fprintf(stderr, "%s [-r] [-o <outfile>] [-d] <input file>\n", progname);
+    fprintf(stderr, "%s [-r] [-8] [-o <outfile>] [-d] <input file>\n", progname);
     exit(1);
 }
 
@@ -1975,8 +2036,17 @@ main(int argc, char *argv[])
 	    break;
 	if (strcmp(argv[argn], "-r") == 0) {
 	    outraw = 1;
+	} else if (strcmp(argv[argn], "-8") == 0) {
+	    ascii_encoding_8_bit = 1;
 	} else if (strcmp(argv[argn], "-d") == 0) {
 	    decompile = 1;
+	} else if (strcmp(argv[argn], "-I") == 0) {
+	    argn++;
+	    if (argn == argc) {
+		fprintf(stderr, "No value supplied for -I\n");
+		exit(1);
+	    }
+	    add_include_dir(argv[argn]);
 	} else if (strcmp(argv[argn], "-o") == 0) {
 	    argn++;
 	    if (argn == argc) {
@@ -2027,7 +2097,7 @@ main(int argc, char *argv[])
     if (decompile)
 	decompile_file(f);
     else
-	compile_file(argv[argn], f, p, outraw, &sdrnum);
+	compile_file(argv[argn - 1], f, p, outraw, &sdrnum);
 
     fclose(f);
 

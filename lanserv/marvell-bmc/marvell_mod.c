@@ -69,7 +69,8 @@
 
 #include <OpenIPMI/ipmi_msgbits.h>
 #include <OpenIPMI/ipmi_bits.h>
-#include <OpenIPMI/serv.h>
+#include <OpenIPMI/lanserv.h>
+#include <OpenIPMI/mcserv.h>
 
 #include "wiw.h"
 
@@ -2814,13 +2815,13 @@ static int simulate_board_presence(emu_out_t  *out,
 	rv = EINVAL;
     }
     if (rv) {
-	out->printf(out, "Invalid board number: %s\n", err);
+	out->eprintf(out, "Invalid board number: %s\n", err);
 	return EINVAL;
     }
     board--;
     rv = get_bool(toks, &present, &err);
     if (rv) {
-	out->printf(out, "Invalid board presence value: %s\n", err);
+	out->eprintf(out, "Invalid board presence value: %s\n", err);
 	return EINVAL;
     }
     simulate_board_absent[board] = !present;
@@ -3051,7 +3052,7 @@ ipmi_sim_module_init(sys_data_t *sys, const char *initstr_i)
 	}
     }
 
-    rv = ipmi_mc_alloc_unconfigured(sys, 0x20, &bmc_mc);
+    rv = sys->mc_alloc_unconfigured(sys, 0x20, &bmc_mc);
     if (rv) {
 	sys->log(sys, OS_ERROR, NULL,
 		 "Unable to allocate an mc: %s", strerror(rv));
@@ -3098,7 +3099,7 @@ ipmi_sim_module_init(sys_data_t *sys, const char *initstr_i)
 	    }
 	}
 
-	rv = ipmi_mc_alloc_unconfigured(sys, board_ipmb[num], &mc);
+	rv = sys->mc_alloc_unconfigured(sys, board_ipmb[num], &mc);
 	if (rv) {
 	    sys->log(sys, OS_ERROR, NULL,
 		     "Unable to allocate an mc: %s", strerror(rv));
@@ -3284,20 +3285,14 @@ ipmi_sim_module_post_init(sys_data_t *sys)
 	 */
 	unsigned char data[13];
 	memset(data, 0, sizeof(data));
-	data[4] = ipmi_mc_get_ipmb(bmc_mc);
+	data[4] = sys->mc_get_ipmb(bmc_mc);
 	data[5] = 0; /* LUN */
 	data[6] = 0x04; /* Event message revision for IPMI 1.5. */
 	data[7] = 0x1d; /* System boot initiated. */
 	data[8] = 20; /* Sensor num */
 	data[9] = (IPMI_ASSERTION << 7) | 0x6f;
 	data[10] = val;
-	rv = mc_new_event(bmc_mc, 0x02, data);
-	if (rv)
-	    sys->log(sys, OS_ERROR, NULL,
-		     "MVMOD: Unable to add reboot cause event: %s, "
-		     "event queue is probably full",
-		     strerror(rv));
-
+	mc_new_event(bmc_mc, 0x02, data);
     }
 
     rv = set_intval(RESET_REASON_FILE, 0);

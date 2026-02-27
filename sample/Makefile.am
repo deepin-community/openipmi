@@ -54,31 +54,34 @@ ipmi_dump_sensors_LDADD = $(top_builddir)/utils/libOpenIPMIutils.la \
 		$(top_builddir)/unix/libOpenIPMIposix.la \
 		$(OPENSSLLIBS)
 
+if HAVE_GLIB
+def_os_hnd = $(top_builddir)/glib/libOpenIPMIglib.la
+else
+def_os_hnd = $(top_builddir)/unix/libOpenIPMIposix.la
+endif
+
 openipmicmd_SOURCES = ipmicmd.c
 openipmicmd_LDADD = $(top_builddir)/utils/libOpenIPMIutils.la \
-		$(top_builddir)/lib/libOpenIPMI.la \
-		$(top_builddir)/unix/libOpenIPMIposix.la \
+		$(top_builddir)/lib/libOpenIPMI.la $(def_os_hnd) \
 		$(OPENSSLLIBS)
-openipmicmd_LDFLAGS = -rdynamic
 
 solterm_SOURCES = solterm.c
 solterm_LDADD = $(POPTLIBS) $(top_builddir)/utils/libOpenIPMIutils.la \
-                $(top_builddir)/lib/libOpenIPMI.la \
-                $(top_builddir)/unix/libOpenIPMIposix.la \
+                $(top_builddir)/lib/libOpenIPMI.la $(def_os_hnd) \
                 $(OPENSSLLIBS)
 
 rmcp_ping_SOURCES = rmcp_ping.c
 rmcp_ping_LDADD = $(SOCKETLIB)
 
 ipmi_serial_bmc_emu_SOURCES = ipmi_serial_bmc_emu.c
-ipmi_serial_bmc_emu_LDADD = -lreadline $(TERM_LIBS) $(SOCKETLIB)
-ipmi_serial_bmc_emu_CFLAGS = -I $(top_srcdir)/libedit
+ipmi_serial_bmc_emu_LDADD = $(READLINE_LIBS) $(TERM_LIBS) $(SOCKETLIB)
+ipmi_serial_bmc_emu_CFLAGS = -I $(top_srcdir)/libedit -I $(top_srcdir)/include
 
 EXTRA_DIST = example_oem.c
 
 # We need to make a link from ipmicmd to openipmicmd for backwards
 # compatability.
-install-data-local:
+install-exec-hook:
 	rm -f $(DESTDIR)$(bindir)/ipmicmd
 	$(LN_S) openipmicmd $(DESTDIR)$(bindir)/ipmicmd
 

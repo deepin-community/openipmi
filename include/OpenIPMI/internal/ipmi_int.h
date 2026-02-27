@@ -34,6 +34,8 @@
 #ifndef OPENIPMI_INT_H
 #define OPENIPMI_INT_H
 
+#include <OpenIPMI/dllvisibility.h>
+
 /* Stuff used internally in the IPMI code, and possibly by OEM code. */
 
 #include <OpenIPMI/os_handler.h>
@@ -103,14 +105,6 @@ void ipmi_set_uint32(unsigned char *data, int val);
 
 /* Add a 16-bit integer to the data, IPMI (little-endian) style. */
 void ipmi_set_uint16(unsigned char *data, int val);
-
-/* Generate a log.  Note that logs should not end in a newline, that
-   will be automatically added as needed to the log.  */
-void ipmi_log(enum ipmi_log_type_e log_type, const char *format, ...)
-#ifdef __GNUC__
-     __attribute__ ((__format__ (__printf__, 2, 3)))
-#endif
-;
 
 /* Information for connection handlers. */
 typedef struct ipmi_con_setup_s ipmi_con_setup_t;
@@ -197,6 +191,7 @@ void i__ipmi_check_sensor_lock(const ipmi_sensor_t *sensor);
 void i__ipmi_check_control_lock(const ipmi_control_t *control);
 #define CHECK_CONTROL_LOCK(control) i__ipmi_check_control_lock(control)
 
+IPMI_UTILS_DLL_PUBLIC
 void ipmi_check_lock(const ipmi_lock_t *lock, const char *str);
 #else
 #define CHECK_MC_LOCK(mc) do {} while (0)

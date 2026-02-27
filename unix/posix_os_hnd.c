@@ -50,13 +50,6 @@
 
 #include <OpenIPMI/ipmi_posix.h>
 
-/* CHEAP HACK - we don't want the user to have to provide this any
-   more. */
-extern void posix_vlog(char                 *format,
-		       enum ipmi_log_type_e log_type,
-		       va_list              ap);
-#pragma weak posix_vlog
-
 typedef struct iposix_info_s
 {
     struct selector_s *sel;
@@ -135,8 +128,6 @@ add_fd(os_handler_t       *handler,
     fd_data->data_ready = data_ready;
     fd_data->handler = handler;
     fd_data->freed = freed;
-    sel_set_fd_write_handler(posix_sel, fd, SEL_FD_HANDLER_DISABLED);
-    sel_set_fd_except_handler(posix_sel, fd, SEL_FD_HANDLER_DISABLED);
     rv = sel_set_fd_handlers(posix_sel, fd, fd_data, fd_handler, 
 			     fd_write_handler, fd_except_handler,
 			     free_fd_data);
@@ -385,8 +376,6 @@ sposix_vlog(os_handler_t         *handler,
 
     if (log_handler)
 	log_handler(handler, format, log_type, ap);
-    else if (posix_vlog)
-	posix_vlog((char *) format, log_type, ap);
     else
 	default_vlog(format, log_type, ap);
 }
@@ -414,6 +403,8 @@ perform_one_op(os_handler_t   *os_hnd,
     rv = sel_select(info->sel, NULL, 0, NULL, timeout);
     if (rv == -1)
 	return errno;
+    if (rv == 0)
+	return ETIMEDOUT;
     return 0;
 }
 

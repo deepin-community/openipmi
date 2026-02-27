@@ -626,11 +626,11 @@ cmd_done(ipmi_cmdlang_t *info)
     }
 }
 
-void
-ipmi_cmdlang_global_err(char *objstr,
-			char *location,
-			char *errstr,
-			int  errval)
+static void
+cmdlang_err(char *objstr,
+	    char *location,
+	    char *errstr,
+	    int  errval)
 {
     if (handling_input && !done && cmd_redisp)
 	fputc('\n', stdout);
@@ -644,8 +644,8 @@ ipmi_cmdlang_global_err(char *objstr,
     redraw_cmdline(0);
 }
 
-void
-ipmi_cmdlang_report_event(ipmi_cmdlang_event_t *event)
+static void
+cmdlang_report_event(ipmi_cmdlang_event_t *event)
 {
     unsigned int                level, len;
     enum ipmi_cmdlang_out_types type;
@@ -995,6 +995,9 @@ main(int argc, char *argv[])
 #ifdef HAVE_TCL
     int              use_tcl = 0;
 #endif
+
+    ipmi_cmdlang_err_rpt = cmdlang_err;
+    ipmi_cmdlang_event_rpt = cmdlang_report_event;
 
     colstr = getenv("COLUMNS");
     if (colstr) {

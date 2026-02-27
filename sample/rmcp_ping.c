@@ -34,11 +34,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <sys/select.h>
-#include <netdb.h>
+#include <OpenIPMI/internal/winsock_compat.h>
 
 unsigned char ping_msg[12] =
 {
@@ -226,10 +223,10 @@ main(int argc, char *argv[])
     }
 
     /* We want it to be non-blocking. */
-    rv = fcntl(sock, F_SETFL, O_NONBLOCK);
+    rv = socket_set_nonblock(sock);
     if (rv) {
-	close(sock);
-	perror("fcntl(sock, F_SETFL, O_NONBLOCK)");
+	close_socket(sock);
+	perror("socket_set_nonblock(sock)");
 	exit(1);
     }
 

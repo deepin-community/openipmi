@@ -58,7 +58,6 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <OpenIPMI/serv.h>
 #include "emu.h"
 #include <OpenIPMI/persist.h>
 
@@ -913,6 +912,9 @@ mc_add_fru_data(emu_out_t *out, emu_data_t *emu, lmc_data_t *mc, char **toks)
     rv = emu_get_uint(out, toks, &length, "FRU physical size");
     if (rv)
 	return rv;
+
+    if (length > MAX_FRU_SIZE)
+	return EINVAL;
 
     tok = mystrtok(NULL, " \t\n", toks);
     if (!tok) {

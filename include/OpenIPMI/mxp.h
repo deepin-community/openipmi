@@ -41,7 +41,11 @@
    to this MXP must have a different swid.  fail_con_cb is called with
    cb_data when a connection goes down. */
 #include <OpenIPMI/ipmiif.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#else
 #include <netinet/in.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,6 +81,7 @@ extern "C" {
  *     user.  The user can use it for anything they like.
  *  new_con - The new connection is returned here.
  */
+IPMI_DLL_PUBLIC
 int mxp_lan_setup_con(struct in_addr            *ip_addrs,
 		      int                       *ports,
 		      unsigned int              num_ip_addrs,

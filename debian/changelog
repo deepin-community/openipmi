@@ -1,8 +1,15 @@
-openipmi (2.0.29-0.1-deepin1) unstable; urgency=medium
+openipmi (2.0.33-1) unstable; urgency=medium
 
-  * Rebuild
+  * new upstream release from 2022-07-07
+  * updated increase-MAX_CONFIG_LINE.patch
+  * d/control updated Homepage
+  * added missing Recommends: kmod  Closes: Bug#981054
+  * updated Standards-Version, no changes needed
+  * linitan pedantic improvements:
+  ** d/control Rules-Requires-Root: no
+  ** d/copyright corrected year to 2022
 
- -- Deepin Packages Builder <packages@deepin.org>  Thu, 24 Nov 2022 07:21:32 +0800
+ -- Noël Köthe <noel@debian.org>  Tue, 19 Jul 2022 09:42:06 +0200
 
 openipmi (2.0.29-0.1) unstable; urgency=medium
 

@@ -53,6 +53,7 @@
 
 #include <OpenIPMI/os_handler.h>
 #include <OpenIPMI/ipmi_tcl.h>
+#include <OpenIPMI/internal/winsock_compat.h>
 
 #include <tcl.h>
 
@@ -215,26 +216,7 @@ free_timer(os_handler_t *handler, os_hnd_timer_id_t *id)
 static int
 get_random(os_handler_t *handler, void *data, unsigned int len)
 {
-    int fd = open("/dev/urandom", O_RDONLY);
-    int rv = 0;
-
-    if (fd == -1)
-	return errno;
-
-    while (len > 0) {
-	rv = read(fd, data, len);
-	if (rv < 0) {
-	    rv = errno;
-	    goto out;
-	}
-	len -= rv;
-    }
-
-    rv = 0;
-
- out:
-    close(fd);
-    return rv;
+    return gen_random(data, len);
 }
 
 static void
@@ -506,7 +488,9 @@ thread_exit(os_handler_t *handler)
 static void
 timeout_callback(ClientData data)
 {
-    /* Nothing to do */
+    int *timedout = data;
+
+    *timedout = 1;
 }
 
 static int
@@ -518,14 +502,17 @@ perform_one_op(os_handler_t   *os_hnd,
        it, but it is pretty close, I guess. */
     int   time_ms;
     Tcl_TimerToken token = NULL;
+    int timedout = 0;
 
     if (timeout) {
 	time_ms= (timeout->tv_sec * 1000) + ((timeout->tv_usec+500) / 1000);
-	token = Tcl_CreateTimerHandler(time_ms, timeout_callback, NULL);
+	token = Tcl_CreateTimerHandler(time_ms, timeout_callback, &timedout);
     }
     Tcl_DoOneEvent(TCL_ALL_EVENTS);
     if (token)
 	Tcl_DeleteTimerHandler(token);
+    if (timedout)
+	return ETIMEDOUT;
     return 0;
 }
 

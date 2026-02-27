@@ -36,7 +36,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <netdb.h>
 
 #include <OpenIPMI/os_handler.h>
 #include <OpenIPMI/ipmi_conn.h>
@@ -51,6 +50,7 @@
 #include <OpenIPMI/internal/ipmi_int.h>
 #include <OpenIPMI/internal/ipmi_oem.h>
 #include <OpenIPMI/internal/locked_list.h>
+#include <OpenIPMI/internal/ipmi_malloc.h>
 
 #if defined(DEBUG_MSG) || defined(DEBUG_RAWMSG)
 static void
@@ -428,8 +428,6 @@ int ipmi_oem_atca_init(void);
 int init_oem_test(void);
 int i_ipmi_smi_init(os_handler_t *os_hnd);
 int i_ipmi_lan_init(os_handler_t *os_hnd);
-int ipmi_malloc_init(os_handler_t *os_hnd);
-void ipmi_malloc_shutdown(void);
 int i_ipmi_rakp_init(void);
 int i_ipmi_aes_cbc_init(void);
 int i_ipmi_hmac_init(void);
@@ -457,6 +455,9 @@ void i_ipmi_sol_shutdown(void);
 
 static locked_list_t *con_type_list;
 static int ipmi_initialized;
+static int lan_initialized;
+static int domain_initialized;
+static int mc_initialized;
 
 int
 ipmi_init(os_handler_t *handler)
@@ -475,10 +476,14 @@ ipmi_init(os_handler_t *handler)
     ipmi_malloc_log = ipmi_log;
 
     con_type_list = locked_list_alloc(handler);
+    if (!con_type_list)
+	return ENOMEM;
 
     rv = i_ipmi_conn_init(handler);
-    if (rv)
+    if (rv) {
+	locked_list_destroy(con_type_list);
 	return rv;
+    }
 
     ipmi_initialized = 1;
 
@@ -500,8 +505,19 @@ ipmi_init(os_handler_t *handler)
     if (rv)
 	goto out_err;
 
-    i_ipmi_domain_init();
-    i_ipmi_mc_init();
+    lan_initialized = 1;
+
+    rv = i_ipmi_domain_init();
+    if (rv)
+	goto out_err;
+
+    domain_initialized = 1;
+
+    rv = i_ipmi_mc_init();
+    if (rv)
+	goto out_err;
+
+    mc_initialized = 1;
 
     rv = i_ipmi_rakp_init();
     if (rv)
@@ -554,25 +570,39 @@ ipmi_shutdown(void)
     if (! ipmi_initialized)
 	return;
 
+    if (!lan_initialized)
+	goto shutdown_lan;
+    lan_initialized = 0;
+    if (!domain_initialized)
+	goto shutdown_domain;
+    domain_initialized = 0;
+    if (!mc_initialized)
+	goto shutdown_mc;
+    mc_initialized = 0;
+
+    ipmi_oem_atca_conn_shutdown();
+    ipmi_oem_atca_shutdown();
+    ipmi_oem_intel_shutdown();
+    ipmi_oem_kontron_conn_shutdown();
     i_ipmi_rakp_shutdown();
     i_ipmi_aes_cbc_shutdown();
     i_ipmi_hmac_shutdown();
     i_ipmi_md5_shutdown();
     i_ipmi_sol_shutdown();
+    i_ipmi_fru_spd_decoder_shutdown();
+    i_ipmi_normal_fru_shutdown();
+    i_ipmi_fru_shutdown();
+ shutdown_mc:
+    i_ipmi_mc_shutdown();
+ shutdown_domain:
+    i_ipmi_domain_shutdown();
+
+ shutdown_lan:
     i_ipmi_lan_shutdown();
 #ifdef HAVE_OPENIPMI_SMI
     i_ipmi_smi_shutdown();
 #endif
-    ipmi_oem_atca_shutdown();
-    ipmi_oem_atca_conn_shutdown();
-    ipmi_oem_intel_shutdown();
-    ipmi_oem_kontron_conn_shutdown();
-    i_ipmi_mc_shutdown();
-    i_ipmi_domain_shutdown();
-    i_ipmi_fru_spd_decoder_shutdown();
     i_ipmi_conn_shutdown();
-    i_ipmi_normal_fru_shutdown();
-    i_ipmi_fru_shutdown();
     if (seq_lock)
 	ipmi_os_handler->destroy_lock(ipmi_os_handler, seq_lock);
     if (con_type_list)

@@ -34,18 +34,11 @@
 #ifndef OPENIPMI_EVENT_H
 #define OPENIPMI_EVENT_H
 
+#include <OpenIPMI/dllvisibility.h>
 #include <OpenIPMI/ipmi_types.h>
 
 /* The event code here is considered internal to OpenIPMI, normal
    users shouldn't use it. */
-
-/* Allocate an event with the given data. */
-ipmi_event_t *ipmi_event_alloc(ipmi_mcid_t   mcid,
-			       unsigned int  record_id,
-			       unsigned int  type,
-			       ipmi_time_t   timestamp,
-			       unsigned char *data,
-			       unsigned int  data_len);
 
 /* The only part of an event that can be set is the mcid, because the
    lower layers may need to allocate an event without knowing what the
@@ -55,6 +48,7 @@ void ipmi_event_set_mcid(ipmi_event_t *event, ipmi_mcid_t mcid);
 
 /* Get a pointer to the event's data.  Note that this pointer will be
    valid only as long as the event is valid. */
+IPMI_DLL_PUBLIC /* Hack = Needed by the UI. */
 const unsigned char *ipmi_event_get_data_ptr(const ipmi_event_t *event);
 
 /* Returns true if the event came in before the time we started up.

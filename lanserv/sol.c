@@ -63,12 +63,17 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
-#include <OpenIPMI/serv.h>
-#include <OpenIPMI/mcserv.h>
 #include <OpenIPMI/lanserv.h>
+#include <OpenIPMI/mcserv.h>
 #include <OpenIPMI/ipmi_lan.h>
 #include <OpenIPMI/ipmi_err.h>
 #include <OpenIPMI/persist.h>
+#include <OpenIPMI/internal/winsock_compat.h>
+#include "ipmi_sim.h"
+#include "sol.h"
+#include "emu.h"
+
+static int sol_init_mc(sys_data_t *sys, lmc_data_t *mc);
 
 /* FIXME - move to configure handling */
 #define USE_UUCP_LOCKING
@@ -325,6 +330,7 @@ sol_to_termios_bitrate(ipmi_sol_t *sol, int solbps)
 	if (retried)
 	    return B9600;
 	solbps = sol->solparm.default_bitrate;
+	retried =1;
 	goto retry;
     }
 }
@@ -424,6 +430,7 @@ sol_serial_update_modemstate(ipmi_sol_t *sol, int ctspause, int deassert_dcd)
 	    val &= ~(TIOCM_DTR | TIOCM_RTS);
 	    val |= modemstate;
 	    ioctl(sol->soldata->fd, TIOCMSET, &val);
+	    sd->modemstate = modemstate;
 	}
     }
 }
@@ -438,14 +445,18 @@ sol_serial_activate(ipmi_sol_t *sol, msg_t *msg)
      * always monitor the history.
      */
     if (!sol->history_size) {
+	int modemstate;
+
+	ioctl(sd->fd, TIOCMGET, &modemstate);
 	if ((msg->data[2] & 1) == 0) {
 	    /* Assuming standard NULL modem, RTS->CTS, DTR->DSR/DCD */
-	    int modemstate;
-	    ioctl(sd->fd, TIOCMGET, &modemstate);
 	    modemstate |= TIOCM_DTR | TIOCM_RTS;
 	    sd->modemstate = TIOCM_DTR | TIOCM_RTS;
-	    ioctl(sd->fd, TIOCMSET, &modemstate);
+	} else {
+	    modemstate &= ~(TIOCM_DTR | TIOCM_RTS);
+	    sd->modemstate = 0;
 	}
+	ioctl(sd->fd, TIOCMSET, &modemstate);
     }
 
     return 0;
@@ -569,7 +580,7 @@ sol_tcp_shutdown(ipmi_sol_t *sol)
     soldata_t *sd = sol->soldata;
 
     if (sd->fd >= 0)
-	close(sd->fd);
+	close_socket(sd->fd);
     sd->fd = -1;
 }
 
@@ -610,7 +621,7 @@ sol_tcp_initialize(ipmi_sol_t *sol)
 
     rv = connect(sd->fd, addr->ai_addr, addr->ai_addrlen);
     if (rv == -1) {
-	close(sd->fd);
+	close_socket(sd->fd);
 	sd->fd = -1;
 	if (sd->sys->debug & DEBUG_SOL)
 	    sd->logchan->log(sd->logchan, OS_ERROR, NULL,
@@ -623,7 +634,7 @@ sol_tcp_initialize(ipmi_sol_t *sol)
     rv = setsockopt(sd->fd, IPPROTO_TCP, TCP_NODELAY,
 		    (char *) &options, sizeof(options));
     if (rv == -1) {
-	close(sd->fd);
+	close_socket(sd->fd);
 	sd->fd = -1;
 	sd->logchan->log(sd->logchan, OS_ERROR, NULL,
 			 "Error setting nodelay on tcp sol port socket"
@@ -632,9 +643,9 @@ sol_tcp_initialize(ipmi_sol_t *sol)
 	goto out;
     }
 
-    rv = fcntl(sd->fd, F_SETFL, O_NONBLOCK);
+    rv = socket_set_nonblock(sd->fd);
     if (rv == -1) {
-	close(sd->fd);
+	close_socket(sd->fd);
 	sd->fd = -1;
 	sd->logchan->log(sd->logchan, OS_ERROR, NULL,
 			 "Error setting nonblock on tcp sol port socket"
@@ -677,7 +688,7 @@ static void sol_set_history_return_size(lmc_data_t    *mc,
 					unsigned int  *rdata_len,
 					void          *cb_data)
 {
-    ipmi_sol_t *sol = ipmi_mc_get_sol(mc);
+    ipmi_sol_t *sol = is_mc_get_sol(mc);
     soldata_t *sd = sol->soldata;
     unsigned int size;
 
@@ -709,7 +720,7 @@ static void sol_get_history_return_size(lmc_data_t    *mc,
 					unsigned int  *rdata_len,
 					void          *cb_data)
 {
-    ipmi_sol_t *sol = ipmi_mc_get_sol(mc);
+    ipmi_sol_t *sol = is_mc_get_sol(mc);
     soldata_t *sd = sol->soldata;
 
     if (!sd) {
@@ -808,14 +819,14 @@ copy_history_buffer(ipmi_sol_t *sol, unsigned int *rsize)
 unsigned char *
 sol_set_frudata(lmc_data_t *mc, unsigned int *size)
 {
-    ipmi_sol_t *sol = ipmi_mc_get_sol(mc);
+    ipmi_sol_t *sol = is_mc_get_sol(mc);
 
     return copy_history_buffer(sol, size);
 }
 
 void sol_free_frudata(lmc_data_t *mc, unsigned char *data)
 {
-    ipmi_sol_t *sol = ipmi_mc_get_sol(mc);
+    ipmi_sol_t *sol = is_mc_get_sol(mc);
     soldata_t *sd = sol->soldata;
 
     if (data)
@@ -829,7 +840,7 @@ ipmi_sol_activate(lmc_data_t    *mc,
 		  unsigned char *rdata,
 		  unsigned int  *rdata_len)
 {
-    ipmi_sol_t *sol = ipmi_mc_get_sol(mc);
+    ipmi_sol_t *sol = is_mc_get_sol(mc);
     soldata_t *sd = sol->soldata;
     uint16_t port;
     int rv;
@@ -947,7 +958,7 @@ ipmi_sol_deactivate(lmc_data_t    *mc,
 		    unsigned char *rdata,
 		    unsigned int  *rdata_len)
 {
-    ipmi_sol_t *sol = ipmi_mc_get_sol(mc);
+    ipmi_sol_t *sol = is_mc_get_sol(mc);
     unsigned int instance;
     uint32_t session_id;
 
@@ -983,10 +994,10 @@ ipmi_sol_deactivate(lmc_data_t    *mc,
 static void
 sol_update_bitrate(lmc_data_t *mc)
 {
-    ipmi_sol_t *sol = ipmi_mc_get_sol(mc);
+    ipmi_sol_t *sol = is_mc_get_sol(mc);
     soldata_t *sd = sol->soldata;
 
-    sd->update_bitrate(ipmi_mc_get_sol(mc));
+    sd->update_bitrate(is_mc_get_sol(mc));
 }
 
 static void
@@ -1155,7 +1166,7 @@ handle_sol_port_payload(lanserv_data_t *lan, ipmi_sol_t *sol, msg_t *msg)
     char isnack, isbreak, ctspause, deassert_dcd, flush_in, flush_out;
     unsigned char *data;
     unsigned int len;
-    int need_send_ack = 0;
+    int need_send_ack = 0, is_dup = 0;
     struct timeval tv;
 
     if (!sol->active || msg->len < 4)
@@ -1175,16 +1186,40 @@ handle_sol_port_payload(lanserv_data_t *lan, ipmi_sol_t *sol, msg_t *msg)
     data = msg->data + 4;
     len = msg->len - 4;
 
+    is_dup = seq == sd->last_acked_packet;
+
+    if (!is_dup) {
+	/* Don't re-do an operation that we already did. */
+
+	if (flush_out) {
+	    sd->waiting_ack = 0;
+	    next_seq(sd);
+	    sd->outlen = 0;
+	}
+
+	if (flush_in) {
+	    unsigned int oldlen = sd->inlen;
+
+	    sd->inlen = 0;
+	    if (oldlen == sizeof(sd->inbuf))
+		send_ack(sol);
+	}
+
+	if (isbreak)
+	    sd->send_break(sol);
+    }
+
+    /* Indepotent with respect to duplicates. */
+    sd->update_modemstate(sol, ctspause, deassert_dcd);
+
     if (seq != 0) {
-	if (seq == sd->last_acked_packet) {
+	if (is_dup) {
 	    need_send_ack = 1;
 	} else if (sd->fd == -1) {
 	    /* Ignore the data. */
-	    if  (len) {
-		sd->last_acked_packet = seq;
-		need_send_ack = 1;
-		sd->last_acked_packet_len = len;
-	    }
+	    sd->last_acked_packet = seq;
+	    need_send_ack = 1;
+	    sd->last_acked_packet_len = len;
 	} else if (len) {
 	    sd->last_acked_packet = seq;
 	    if (sol->do_telnet) {
@@ -1211,6 +1246,10 @@ handle_sol_port_payload(lanserv_data_t *lan, ipmi_sol_t *sol, msg_t *msg)
 	    sd->last_acked_packet_len = len;
 	    need_send_ack = 1;
 	    set_write_enable(sol->soldata);
+	} else {
+	    sd->last_acked_packet = seq;
+	    sd->last_acked_packet_len = 0;
+	    need_send_ack = 1;
 	}
     }
 
@@ -1244,20 +1283,6 @@ handle_sol_port_payload(lanserv_data_t *lan, ipmi_sol_t *sol, msg_t *msg)
 
     if (need_send_ack)
 	send_ack(sol);
-
-    if (flush_out) {
-	sd->waiting_ack = 0;
-	next_seq(sd);
-	sd->outlen = 0;
-    }
-
-    if (flush_in)
-	sd->inlen = 0;
-
-    if (isbreak)
-	sd->send_break(sol);
-
-    sd->update_modemstate(sol, ctspause, deassert_dcd);
 }
 
 static int
@@ -1397,7 +1422,7 @@ handle_sol_payload(lanserv_data_t *lan, msg_t *msg)
     if (!mc)
 	return;
 
-    sol = ipmi_mc_get_sol(mc);
+    sol = is_mc_get_sol(mc);
     if (msg->sid == sol->session_id)
 	handle_sol_port_payload(lan, sol, msg);
     else if (msg->sid == sol->history_session_id)
@@ -1427,6 +1452,7 @@ sol_write_ready(int fd, void *cb_data)
 {
     ipmi_sol_t *sol = cb_data;
     soldata_t *sd = sol->soldata;
+    unsigned int oldlen;
     int rv;
 
     rv = write(fd, sd->inbuf, sd->inlen);
@@ -1437,10 +1463,15 @@ sol_write_ready(int fd, void *cb_data)
 	sol_port_error(sol);
 	return;
     }
+    if (rv == 0)
+	return;
 
     if (((unsigned int) rv) < sd->inlen)
 	memcpy(sd->inbuf, sd->inbuf + rv, sd->inlen - rv);
+    oldlen = sd->inlen;
     sd->inlen -= rv;
+    if (oldlen == sizeof(sd->inbuf))
+	send_ack(sol);
 
     set_write_enable(sd);
 }
@@ -1611,7 +1642,7 @@ sol_data_ready(int fd, void *cb_data)
 }
 
 int
-sol_read_config(char **tokptr, sys_data_t *sys, const char **err)
+is_sol_read_config(char **tokptr, sys_data_t *sys, const char **err)
 {
     ipmi_sol_t *sol = sys->sol;
     unsigned int val;
@@ -1737,7 +1768,7 @@ read_sol_config(sys_data_t *sys)
 
 	if (!mc)
 	    continue;
-	sol = ipmi_mc_get_sol(mc);
+	sol = is_mc_get_sol(mc);
 	if (!sol->configured)
 	    continue;
 
@@ -1746,7 +1777,7 @@ read_sol_config(sys_data_t *sys)
 	sol->solparm.enabled = 1;
 	sol->solparm.bitrate_nonv = 0;
 
-	p = read_persist("sol.mc%2.2x", ipmi_mc_get_ipmb(mc));
+	p = read_persist("sol.mc%2.2x", sys->mc_get_ipmb(mc));
 	if (p) {
 	    if (!read_persist_int(p, &iv, "enabled"))
 		sol->solparm.enabled = iv;
@@ -1772,13 +1803,13 @@ write_sol_config(lmc_data_t *mc)
     ipmi_sol_t *sol;
     persist_t *p;
 
-    sol = ipmi_mc_get_sol(mc);
+    sol = is_mc_get_sol(mc);
 
-    p = alloc_persist("sol.mc%2.2x", ipmi_mc_get_ipmb(mc));
+    p = alloc_persist("sol.mc%2.2x", sol->soldata->sys->mc_get_ipmb(mc));
     if (!p)
 	return ENOMEM;
 
-    sol = ipmi_mc_get_sol(mc);
+    sol = is_mc_get_sol(mc);
 
     add_persist_int(p, sol->solparm.enabled, "enabled");
     add_persist_int(p, sol->solparm.bitrate_nonv, "bitrate");
@@ -1844,10 +1875,10 @@ handle_sol_shutdown(void *info, int sig)
     fclose(f);
 }
 
-int
+static int
 sol_init_mc(sys_data_t *sys, lmc_data_t *mc)
 {
-    ipmi_sol_t *sol = ipmi_mc_get_sol(mc);
+    ipmi_sol_t *sol = is_mc_get_sol(mc);
     soldata_t *sd;
 
     sd = sys->alloc(sys, sizeof(*sd));
@@ -1902,7 +1933,7 @@ sol_init_mc(sys_data_t *sys, lmc_data_t *mc)
     sd->fd = -1;
     sd->curr_packet_seq = 1;
     sd->history_curr_packet_seq = 1;
-    sd->logchan = ipmi_mc_get_channelset(mc)[0];
+    sd->logchan = sd->sys->mc_get_channelset(mc)[0];
 
     if (sol_port_init(sol)) {
 	/* Retry in 10 seconds. */
